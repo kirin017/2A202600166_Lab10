@@ -1,0 +1,92 @@
+# Data contract — Lab Day 10 (tiếp nối artifact CS + IT Helpdesk)
+# Sinh viên bổ sung owner, SLA freshness, và nguồn canonical.
+
+version: "1.1"
+dataset: "kb_chunk_export"
+owner_team: "data-platform-team"
+
+schema_cleaned:
+  chunk_id:
+    type: string
+    required: true
+    description: "ID ổn định sau clean (doc_id + seq + sha256[:16])"
+    unique: true
+  doc_id:
+    type: string
+    required: true
+    description: "Khóa logic tài liệu nguồn (vd policy_refund_v4)"
+    allowed_values: [policy_refund_v4, sla_p1_2026, it_helpdesk_faq, hr_leave_policy]
+  chunk_text:
+    type: string
+    required: true
+    constraints:
+      min_length: 30   # Rule 8: chunk_too_short quarantine threshold
+      note: "Expectation E7 warns at < 60 chars"
+  effective_date:
+    type: date
+    required: true
+    format: "YYYY-MM-DD"
+    note: "Auto-normalized from dd/mm/yyyy if detectable"
+  exported_at:
+    type: datetime
+    required: true
+    format: "ISO 8601"
+    note: "Used for freshness measurement; empty exported_at → quarantine (Rule 7)"
+
+quality_rules:
+  - id: "no_duplicate_chunk_text"
+    severity: "warn"
+    description: "Dedupe by normalized text (lowercase + collapsed whitespace)"
+  - id: "no_stale_refund_window"
+    description: "Chunk policy_refund_v4 không được chứa '14 ngày làm việc' (v3 bị stale)"
+    severity: "halt"
+  - id: "no_stale_hr_annual_10d"
+    description: "Chunk hr_leave_policy không được chứa '10 ngày phép năm' (bản 2025)"
+    severity: "halt"
+  - id: "missing_exported_at"
+    description: "Chunk thiếu trường exported_at không thể đo freshness → quarantine"
+    severity: "quarantine"
+  - id: "chunk_too_short"
+    description: "Chunk < 30 chars sau strip thiếu ngữ cảnh cho retrieval → quarantine"
+    severity: "quarantine"
+
+freshness:
+  measured_at: "publish"  # Đo tại thời điểm embed vào Chroma
+  sla_hours: 24
+  alert_channel: "data-platform-slack"
+  watermark_field: "latest_exported_at"  # Đọc từ manifest
+  note: |
+    CSV mẫu có exported_at cũ (2026-04-10) → freshness FAIL là hợp lý.
+    SLA áp dụng cho "data snapshot" (exported_at), không phải pipeline run_timestamp.
+    Điều chỉnh FRESHNESS_SLA_HOURS trong .env hoặc cập nhật exported_at có chủ đích.
+
+canonical_sources:
+  - path: "data/docs/policy_refund_v4.txt"
+    doc_id: "policy_refund_v4"
+    owner: "cs-policy-team"
+    description: "Chính sách hoàn tiền CS — cửa sổ 7 ngày làm việc (v4)"
+  - path: "data/docs/sla_p1_2026.txt"
+    doc_id: "sla_p1_2026"
+    owner: "it-ops-team"
+    description: "SLA ticket P1 — phản hồi 15 phút, resolution 4 giờ"
+  - path: "data/docs/it_helpdesk_faq.txt"
+    doc_id: "it_helpdesk_faq"
+    owner: "it-helpdesk-team"
+    description: "FAQ IT Helpdesk — khóa tài khoản sau 5 lần sai"
+  - path: "data/docs/hr_leave_policy.txt"
+    doc_id: "hr_leave_policy"
+    owner: "hr-team"
+    description: "Chính sách nghỉ phép HR 2026 — 12 ngày phép cho < 3 năm kinh nghiệm"
+
+# Baseline allowlist export — đồng bộ với cleaning_rules.ALLOWED_DOC_IDS
+allowed_doc_ids:
+  - policy_refund_v4
+  - sla_p1_2026
+  - it_helpdesk_faq
+  - hr_leave_policy
+
+# Versioning cutoff — đọc tại cleaning_rules.py (không hard-code ngày vào code)
+policy_versioning:
+  hr_leave_min_effective_date: "2026-01-01"
+  refund_window_days: 7        # Phiên bản hợp lệ: 7 ngày (v4)
+  refund_stale_window_days: 14 # Phiên bản stale: 14 ngày (v3)
