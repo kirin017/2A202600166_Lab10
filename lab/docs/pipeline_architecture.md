@@ -1,6 +1,6 @@
 # Kiến trúc pipeline — Lab Day 10
 
-**Nhóm:** Tan Long (cá nhân)
+**Nhóm:** 
 **Cập nhật:** 2026-04-15
 
 ---
